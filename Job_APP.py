@@ -720,11 +720,11 @@ def format_event_message(
 def decode_and_collect_logs(
     contract,
     event_name: str,
-    from_block: int,
-    to_block: int
+    fromBlock: int,
+    toBlock: int
 ) -> List[Dict[str, Any]]:
     event_obj = getattr(contract.events, event_name)
-    logs = event_obj().get_logs(from_block=from_block, to_block=to_block)
+    logs = event_obj().get_logs(fromBlock=fromBlock, toBlock=toBlock)
 
     collected: List[Dict[str, Any]] = []
     for ev in logs:
@@ -756,26 +756,26 @@ def main() -> int:
     last_checked_block = state.get("last_checked_block")
     if last_checked_block is None:
         if START_BLOCK > 0:
-            from_block = START_BLOCK
+            fromBlock = START_BLOCK
         else:
-            from_block = max(latest_block - BLOCK_LOOKBACK_ON_FIRST_RUN, 0)
+            fromBlock = max(latest_block - BLOCK_LOOKBACK_ON_FIRST_RUN, 0)
     else:
-        from_block = int(last_checked_block) + 1
+        fromBlock = int(last_checked_block) + 1
 
-    to_block = latest_block
+    toBlock = latest_block
 
-    if from_block > to_block:
-        logging.info("No new blocks to scan. from_block=%s to_block=%s", from_block, to_block)
+    if fromBlock > toBlock:
+        logging.info("No new blocks to scan. fromBlock=%s toBlock=%s", fromBlock, toBlock)
         return 0
 
-    logging.info("Scanning blocks %s -> %s", from_block, to_block)
+    logging.info("Scanning blocks %s -> %s", fromBlock, toBlock)
 
     all_logs: List[Dict[str, Any]] = []
-    chunk_start = from_block
+    chunk_start = fromBlock
     event_names = all_event_names()
 
-    while chunk_start <= to_block:
-        chunk_end = min(chunk_start + BLOCK_CHUNK_SIZE - 1, to_block)
+    while chunk_start <= toBlock:
+        chunk_end = min(chunk_start + BLOCK_CHUNK_SIZE - 1, toBlock)
         logging.info("Scanning chunk %s -> %s", chunk_start, chunk_end)
 
         for event_name in event_names:
@@ -805,7 +805,7 @@ def main() -> int:
 
     if not all_logs:
         logging.info("No matching events found.")
-        save_state(to_block)
+        save_state(toBlock)
         return 0
 
     posted = 0
@@ -829,8 +829,8 @@ def main() -> int:
             logging.error("Failed posting Discord message for %s: %s", item["event_name"], exc)
 
     logging.info("Posted %s Discord messages.", posted)
-    save_state(to_block)
-    logging.info("Saved state at block %s", to_block)
+    save_state(toBlock)
+    logging.info("Saved state at block %s", toBlock)
     return 0
 
 if __name__ == "__main__":
