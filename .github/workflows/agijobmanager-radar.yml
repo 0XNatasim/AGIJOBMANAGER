@@ -14,14 +14,14 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Create state directory and file
+      - name: Prepare state directory
         run: |
           mkdir -p state
           if [ ! -f state/state.json ]; then
             echo '{"last_checked_block": null}' > state/state.json
           fi
 
-      - name: Download previous state artifact
+      - name: Download previous state
         uses: actions/download-artifact@v4
         with:
           name: agijobmanager-radar-state
@@ -44,17 +44,11 @@ jobs:
           START_BLOCK: ${{ secrets.START_BLOCK }}
           STATE_FILE: state/state.json
           CONFIG_FILE: radar_config.json
-          BLOCK_LOOKBACK_ON_FIRST_RUN: 500
-          BLOCK_CHUNK_SIZE: 2000
-          CHAIN_NAME: Ethereum
-          TOKEN_SYMBOL: AGIALPHA
         run: python Job_APP.py
 
-      - name: Upload updated state artifact
-        if: always()
+      - name: Upload state
         uses: actions/upload-artifact@v4
         with:
           name: agijobmanager-radar-state
           path: state/state.json
-          if-no-files-found: warn
-          overwrite: true
+        continue-on-error: true
