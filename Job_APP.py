@@ -77,6 +77,13 @@ def ipfs_gateway(uri: str):
 
 
 # --------------------------------------------------
+# Load ABI
+# --------------------------------------------------
+
+with open("abi/AGIJobManager.json", "r") as f:
+    ABI = json.load(f)
+
+# --------------------------------------------------
 # Web3
 # --------------------------------------------------
 
@@ -87,11 +94,9 @@ if not web3.is_connected():
     sys.exit(1)
 
 contract = web3.eth.contract(
-    address=Web3.to_checksum_address(CONTRACT_ADDRESS)
+    address=Web3.to_checksum_address(CONTRACT_ADDRESS),
+    abi=ABI
 )
-
-latest_block = web3.eth.block_number
-logging.info("Connected. Latest block: %s", latest_block)
 
 # --------------------------------------------------
 # State
