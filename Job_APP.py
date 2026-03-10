@@ -1,290 +1,139 @@
 import json
-import logging
 import os
 import sys
-from decimal import Decimal
-from pathlib import Path
-from typing import Any, Dict, List
-
-import requests
-from dotenv import load_dotenv
+import logging
 from web3 import Web3
+from dotenv import load_dotenv
+import requests
 
 load_dotenv()
 
-ALCHEMY_URL = os.getenv("ALCHEMY_URL", "").strip()
-CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "").strip()
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
-
-STATE_FILE = os.getenv("STATE_FILE", "state/state.json")
-CONFIG_FILE = os.getenv("CONFIG_FILE", "radar_config.json")
+ALCHEMY_URL = os.getenv("ALCHEMY_URL")
+CONTRACT_ADDRESS = Web3.to_checksum_address(os.getenv("CONTRACT_ADDRESS"))
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 START_BLOCK = int(os.getenv("START_BLOCK", "0"))
-BLOCK_LOOKBACK_ON_FIRST_RUN = int(os.getenv("BLOCK_LOOKBACK_ON_FIRST_RUN", "500"))
-BLOCK_CHUNK_SIZE = int(os.getenv("BLOCK_CHUNK_SIZE", "200"))  # safer for Alchemy
+BLOCK_CHUNK_SIZE = int(os.getenv("BLOCK_CHUNK_SIZE", "500"))
 
-TOKEN_SYMBOL = os.getenv("TOKEN_SYMBOL", "AGIALPHA")
+STATE_FILE = "state/state.json"
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO)
 
-# --------------------------------------------------
-# Validate env
-# --------------------------------------------------
-
-missing = []
-if not ALCHEMY_URL:
-    missing.append("ALCHEMY_URL")
-if not CONTRACT_ADDRESS:
-    missing.append("CONTRACT_ADDRESS")
-if not DISCORD_WEBHOOK_URL:
-    missing.append("DISCORD_WEBHOOK_URL")
-
-if missing:
-    logging.error("Missing env vars: %s", ",".join(missing))
-    sys.exit(1)
-
-# --------------------------------------------------
-# Helpers
-# --------------------------------------------------
-
-
-def ensure_dir(filepath):
-    Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-
-
-def load_json(filepath, default):
-    try:
-        with open(filepath, "r") as f:
-            return json.load(f)
-    except:
-        return default
-
-
-def save_json(filepath, data):
-    ensure_dir(filepath)
-    with open(filepath, "w") as f:
-        json.dump(data, f, indent=2)
-
-
-def wei_to_token(value: int):
-    return f"{Decimal(value)/Decimal(10**18)} {TOKEN_SYMBOL}"
-
-
-def ipfs_gateway(uri: str):
-    if uri.startswith("ipfs://"):
-        return "https://ipfs.io/ipfs/" + uri.replace("ipfs://", "")
-    return uri
-
-
-# --------------------------------------------------
+# -----------------------------
 # Load ABI
-# --------------------------------------------------
+# -----------------------------
 
-with open("abi/AGIJobManager.json", "r") as f:
+with open("abi/AGIJobManager.json") as f:
     ABI = json.load(f)
 
-# --------------------------------------------------
+# -----------------------------
 # Web3
-# --------------------------------------------------
+# -----------------------------
 
 web3 = Web3(Web3.HTTPProvider(ALCHEMY_URL))
 
 if not web3.is_connected():
-    logging.error("Web3 connection failed")
+    print("RPC connection failed")
     sys.exit(1)
 
-contract = web3.eth.contract(
-    address=Web3.to_checksum_address(CONTRACT_ADDRESS),
-    abi=ABI
-)
+contract = web3.eth.contract(address=CONTRACT_ADDRESS, abi=ABI)
 
-# --------------------------------------------------
+latest_block = web3.eth.block_number
+
+logging.info(f"Latest block {latest_block}")
+
+# -----------------------------
 # State
-# --------------------------------------------------
+# -----------------------------
 
-state = load_json(STATE_FILE, {"last_checked_block": None})
-last_checked = state.get("last_checked_block")
+os.makedirs("state", exist_ok=True)
 
-if last_checked is None:
-    if START_BLOCK > 0:
-        start_block = START_BLOCK
-    else:
-        start_block = max(latest_block - BLOCK_LOOKBACK_ON_FIRST_RUN, 0)
+if os.path.exists(STATE_FILE):
+    with open(STATE_FILE) as f:
+        state = json.load(f)
+        start_block = state["last_block"] + 1
 else:
-    start_block = int(last_checked) + 1
+    start_block = START_BLOCK
 
 end_block = latest_block
 
-logging.info("START_BLOCK from env: %s", START_BLOCK)
-logging.info("Scanning blocks %s -> %s", start_block, end_block)
+logging.info(f"Scanning {start_block} → {end_block}")
 
-# --------------------------------------------------
-# Event list (important ones)
-# --------------------------------------------------
+# -----------------------------
+# Event topic map
+# -----------------------------
 
-EVENTS = [
-    "JobCreated",
-    "JobApplied",
-    "JobCompletionRequested",
-    "JobValidated",
-    "JobDisputed",
-    "DisputeResolvedWithCode",
-    "JobCompleted",
-    "JobExpired",
-    "JobCancelled",
-]
+topic_map = {}
 
-# --------------------------------------------------
-# Discord
-# --------------------------------------------------
+for item in ABI:
+    if item["type"] == "event":
+        signature = f"{item['name']}({','.join(i['type'] for i in item['inputs'])})"
+        topic = web3.keccak(text=signature).hex()
+        topic_map[topic] = item["name"]
 
-
-def post(msg):
-
-    payload = {"content": msg[:1900]}
-
-    r = requests.post(DISCORD_WEBHOOK_URL, json=payload)
-
-    if r.status_code >= 400:
-        raise Exception(r.text)
-
-
-# --------------------------------------------------
-# Scanner
-# --------------------------------------------------
+# -----------------------------
+# Scan logs
+# -----------------------------
 
 all_events = []
 
-chunk_start = start_block
+block = start_block
 
-while chunk_start <= end_block:
+while block <= end_block:
 
-    chunk_end = min(chunk_start + BLOCK_CHUNK_SIZE - 1, end_block)
+    chunk_end = min(block + BLOCK_CHUNK_SIZE, end_block)
 
-    logging.info("Scanning chunk %s -> %s", chunk_start, chunk_end)
+    logging.info(f"Chunk {block} → {chunk_end}")
 
-    for event in EVENTS:
+    logs = web3.eth.get_logs({
+        "fromBlock": block,
+        "toBlock": chunk_end,
+        "address": CONTRACT_ADDRESS
+    })
 
-        try:
+    for log in logs:
 
-            event_obj = getattr(contract.events, event)
+        topic0 = log["topics"][0].hex()
 
-            logs = event_obj().get_logs(
-                fromBlock=chunk_start,
-                toBlock=chunk_end
-            )
+        if topic0 not in topic_map:
+            continue
 
-            if logs:
-                logging.info("Found %s logs for %s", len(logs), event)
+        event_name = topic_map[topic0]
 
-            for log in logs:
+        decoded = contract.events[event_name]().process_log(log)
 
-                all_events.append({
-                    "event": event,
-                    "args": dict(log["args"]),
-                    "block": log["blockNumber"],
-                    "tx": log["transactionHash"].hex(),
-                    "index": log["logIndex"]
-                })
+        all_events.append({
+            "event": event_name,
+            "args": dict(decoded["args"]),
+            "block": log["blockNumber"],
+            "tx": log["transactionHash"].hex()
+        })
 
-        except Exception as e:
+    block = chunk_end + 1
 
-            logging.error(
-                "Error reading %s in blocks %s-%s: %s",
-                event,
-                chunk_start,
-                chunk_end,
-                e
-            )
-
-    chunk_start = chunk_end + 1
-
-# --------------------------------------------------
-# Sort events
-# --------------------------------------------------
-
-all_events.sort(key=lambda x: (x["block"], x["index"]))
-
-# --------------------------------------------------
-# Post events
-# --------------------------------------------------
-
-posted = 0
+# -----------------------------
+# Send to Discord
+# -----------------------------
 
 for e in all_events:
 
-    args = e["args"]
-    name = e["event"]
+    msg = f"""
+🚨 **{e['event']}**
 
-    if name == "JobCreated":
-
-        msg = f"""🚨 **JobCreated**
-
-Job ID: `{args["jobId"]}`
-Payout: `{wei_to_token(args["payout"])}`
-Duration: `{args["duration"]}`
-Spec: {args["jobSpecURI"]}
-Gateway: {ipfs_gateway(args["jobSpecURI"])}
-
-Details:
-{args["details"]}
-
-Block: `{e["block"]}`
-Tx: `{e["tx"]}`
-"""
-
-    elif name == "JobApplied":
-
-        msg = f"""🤖 **JobApplied**
-
-Job ID: `{args["jobId"]}`
-Agent: `{args["agent"]}`
-
-Block: `{e["block"]}`
-Tx: `{e["tx"]}`
-"""
-
-    elif name == "JobCompletionRequested":
-
-        msg = f"""📦 **Completion Requested**
-
-Job ID: `{args["jobId"]}`
-Agent: `{args["agent"]}`
-
-Completion:
-{args["jobCompletionURI"]}
-
-Block: `{e["block"]}`
-Tx: `{e["tx"]}`
-"""
-
-    else:
-
-        msg = f"""📡 **{name}**
+Block: {e['block']}
+Tx: {e['tx']}
 
 Args:
-{args}
-
-Block: `{e["block"]}`
-Tx: `{e["tx"]}`
+{json.dumps(e['args'], indent=2)}
 """
 
-    try:
+    requests.post(DISCORD_WEBHOOK_URL, json={"content": msg[:1800]})
 
-        post(msg)
-        posted += 1
-
-    except Exception as err:
-
-        logging.error("Discord post failed: %s", err)
-
-# --------------------------------------------------
+# -----------------------------
 # Save state
-# --------------------------------------------------
+# -----------------------------
 
-save_json(STATE_FILE, {"last_checked_block": end_block})
+with open(STATE_FILE, "w") as f:
+    json.dump({"last_block": end_block}, f)
 
-logging.info("Posted %s messages", posted)
-logging.info("Saved state block %s", end_block)
-
-sys.exit(0)
+logging.info(f"Processed {len(all_events)} events")
