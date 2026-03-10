@@ -14,8 +14,12 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Create state directory
-        run: mkdir -p state
+      - name: Create state directory and file
+        run: |
+          mkdir -p state
+          if [ ! -f state/state.json ]; then
+            echo '{"last_checked_block": null}' > state/state.json
+          fi
 
       - name: Download previous state artifact
         uses: actions/download-artifact@v4
