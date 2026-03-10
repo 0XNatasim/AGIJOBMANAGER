@@ -1,0 +1,56 @@
+name: AGIJobManager Radar
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Create state directory
+        run: mkdir -p state
+
+      - name: Download previous state artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: agijobmanager-radar-state
+          path: state
+        continue-on-error: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run radar
+        env:
+          ALCHEMY_URL: ${{ secrets.ALCHEMY_URL }}
+          CONTRACT_ADDRESS: ${{ secrets.CONTRACT_ADDRESS }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          START_BLOCK: ${{ secrets.START_BLOCK }}
+          STATE_FILE: state/state.json
+          CONFIG_FILE: radar_config.json
+          BLOCK_LOOKBACK_ON_FIRST_RUN: 500
+          BLOCK_CHUNK_SIZE: 2000
+          CHAIN_NAME: Ethereum
+          TOKEN_SYMBOL: AGIALPHA
+        run: python Job_APP.py
+
+      - name: Upload updated state artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agijobmanager-radar-state
+          path: state/state.json
+          if-no-files-found: warn
+          overwrite: true

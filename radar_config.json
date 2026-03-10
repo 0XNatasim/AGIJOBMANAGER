@@ -1,0 +1,21 @@
+{
+  "mute_events": [
+    "Approval",
+    "ApprovalForAll",
+    "Transfer"
+  ],
+  "mention_everyone_for": [
+    "JobCreated",
+    "JobCompletionRequested",
+    "JobDisputed",
+    "DisputeResolvedWithCode",
+    "JobCompleted",
+    "JobExpired",
+    "JobCancelled"
+  ],
+  "max_events_per_run": 200,
+  "discord_username": "AGIJobManager Radar",
+  "discord_avatar_url": "",
+  "include_tx_hash": true,
+  "include_block_number": true
+}
