@@ -9,8 +9,8 @@ import requests
 load_dotenv()
 
 ALCHEMY_URL = os.getenv("ALCHEMY_URL")
-CONTRACT_ADDRESS = Web3.to_checksum_address(os.getenv("CONTRACT_ADDRESS"))
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+CONTRACT_ADDRESS = Web3.to_checksum_address(os.getenv("CONTRACT_ADDRESS", "").strip())
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL").strip()
 
 START_BLOCK = int(os.getenv("START_BLOCK", "0"))
 BLOCK_CHUNK_SIZE = int(os.getenv("BLOCK_CHUNK_SIZE", "500"))
