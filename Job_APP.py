@@ -832,6 +832,7 @@ def main() -> int:
     save_state(toBlock)
     logging.info("Saved state at block %s", toBlock)
     return 0
+    logging.info(f"START_BLOCK from env: {START_BLOCK}")
 
 if __name__ == "__main__":
     sys.exit(main())
